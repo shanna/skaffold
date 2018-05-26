@@ -104,7 +104,7 @@ func (k *KubectlDeployer) Deploy(ctx context.Context, out io.Writer, builds []bu
 
 // Cleanup deletes what was deployed by calling Deploy.
 func (k *KubectlDeployer) Cleanup(ctx context.Context, out io.Writer) error {
-	if len(k.KubectlDeploy.Manifests) == 0 {
+	if len(k.KubectlDeploy.Manifests) == 0 || len(k.KubectlDeploy.Commands) > 0 {
 		return k.kubectl(nil, out, "delete", "deployment", "skaffold")
 	}
 
@@ -129,7 +129,7 @@ func (k *KubectlDeployer) Dependencies() ([]string, error) {
 // readOrGenerateManifests reads the manifests to deploy/delete. If no manifest exists, try to
 // generate it with the information we have.
 func (k *KubectlDeployer) readOrGenerateManifests(builds []build.Build) (manifestList, error) {
-	if len(k.KubectlDeploy.Manifests) > 0 {
+	if len(k.KubectlDeploy.Manifests) > 0 || len(k.KubectlDeploy.Commands) > 0 {
 		return k.readManifests()
 	}
 
@@ -206,9 +206,27 @@ func (k *KubectlDeployer) readManifests() (manifestList, error) {
 		manifests = append(manifests, manifest)
 	}
 
+	for _, m := range k.KubectlDeploy.Commands {
+		buf, err := k.readCommandManifest(m)
+		if err != nil {
+			return nil, errors.Wrap(err, "get command manifests")
+		}
+
+		parts := bytes.Split(buf, []byte("\n---"))
+		for _, part := range parts {
+			manifests = append(manifests, part)
+		}
+	}
+
 	logrus.Debugln("manifests", manifests.String())
 
 	return manifests, nil
+}
+
+func (k *KubectlDeployer) readCommandManifest(name string) ([]byte, error) {
+	parts := strings.Fields(name)
+	command := exec.Command(parts[0], parts[1:]...)
+	return util.RunCmdOut(command)
 }
 
 func (k *KubectlDeployer) readRemoteManifest(name string) ([]byte, error) {
